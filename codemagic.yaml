@@ -33,7 +33,7 @@ workflows:
           EXTRACTED_TEAM=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract TeamIdentifier xml1 -o - - | grep string | sed 's/^<string>\(.*\)<\/string>$/\1/g' | xargs)
           echo "DETECTED DEVELOPMENT TEAM ID: $EXTRACTED_TEAM"
           
-          # Saves them globally for Codemagic and Xcode builds
+          # --- FIXED: Saves them globally into the true Codemagic Environment file ---
           echo "export BUNDLE_ID=\"$EXTRACTED_ID\"" >> $CM_ENV
           echo "export DEVELOPMENT_TEAM=\"$EXTRACTED_TEAM\"" >> $CM_ENV
           
@@ -78,12 +78,13 @@ workflows:
           
           echo "Manual code-signing setup completed successfully!"
 
-      # --- FIXED STEP: Explicitly overrides Team ID and enforces the profile mapping ---
+      # --- FIXED STEP: Targets real iOS devices and loads persistent variables ---
       - name: Build Signed IPA File
         script: |
-          echo "Compiling workspace archive with explicit Team credentials..."
+          echo "Compiling workspace archive targeting iPhoneOS platform..."
           xcodebuild -project "$CM_BUILD_DIR/$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
+            -sdk iphoneos \
             -configuration Release \
             -archivePath "$CM_BUILD_DIR/build/Aridman.xcarchive" \
             DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
@@ -120,3 +121,4 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+
