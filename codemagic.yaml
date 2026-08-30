@@ -77,23 +77,43 @@ workflows:
           
           echo "Manual code-signing setup completed successfully!"
 
-      # --- FIXED STEP: Uses raw xcodebuild compiler commands to bypass the .plist error ---
+      # --- FIXED STEP: Dynamically generates the configuration and exports the .ipa ---
       - name: Build Signed IPA File
         script: |
-          echo "Compiling and packaging binary archive..."
+          echo "Compiling basic workspace archive..."
           xcodebuild -project "$CM_BUILD_DIR/$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -configuration Release \
             -archivePath "$CM_BUILD_DIR/build/Aridman.xcarchive" \
-            archive
+            clean archive
           
-          echo "Exporting compiled archive to unsigned package directory..."
+          echo "Generating automated inline ExportOptions config template..."
+          cat <<EOF > "$CM_BUILD_DIR/ExportOptions.plist"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://apple.com">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>ad-hoc</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>compileBitcode</key>
+              <false/>
+              <key>destination</key>
+              <string>export</string>
+          </dict>
+          </plist>
+          EOF
+          
+          echo "Exporting compiled archive to direct standalone package..."
+          mkdir -p "$CM_BUILD_DIR/build/ios/ipa"
           xcodebuild -exportArchive \
             -archivePath "$CM_BUILD_DIR/build/Aridman.xcarchive" \
             -exportPath "$CM_BUILD_DIR/build/ios/ipa" \
-            -exportOptionsPlist "$CM_BUILD_DIR/project.yml" || true
+            -exportOptionsPlist "$CM_BUILD_DIR/ExportOptions.plist" \
+            -allowProvisioningUpdates
             
     artifacts:
+      # This targets the generated standalone package output directly
       - build/ios/ipa/*.ipa
-      - $CM_BUILD_DIR/build/Aridman.xcarchive
       - /tmp/xcodebuild_logs/*.log
