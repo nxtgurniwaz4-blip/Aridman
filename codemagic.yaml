@@ -1,0 +1,34 @@
+workflows:
+  ios-native:
+    name: Aridman’s Happy Place — iOS
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+      vars:
+        XCODE_PROJECT: "AridmansHappyPlace.xcodeproj"
+        XCODE_SCHEME: "AridmansHappyPlace"
+        BUNDLE_ID: "com.aridman.happyplace"
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.aridman.happyplace
+    scripts:
+      - name: Install project generator
+        script: |
+          gem install xcodegen
+      - name: Generate Xcode project
+        script: |
+          xcodegen generate --spec project.yml
+      - name: Set up iOS signing
+        script: |
+          xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
