@@ -38,9 +38,11 @@ workflows:
             sed -i '' "s/com.aridman.happyplace/$EXTRACTED_ID/g" "$CM_BUILD_DIR/project.yml"
           fi
 
+      # --- UPDATED: Uses Homebrew (brew) to reliably pull down xcodegen ---
       - name: Install project generator
         script: |
-          gem install xcodegen
+          echo "Installing xcodegen via homebrew system packages..."
+          brew install xcodegen
 
       - name: Generate Xcode project
         script: |
