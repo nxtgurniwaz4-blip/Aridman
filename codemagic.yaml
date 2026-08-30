@@ -56,7 +56,7 @@ workflows:
           
           echo "Manual code-signing setup completed successfully!"
 
-      # --- FIXED STEP: Variables are extracted and used instantly inside ONE step shell ---
+      # --- FIXED STEP: Cleans the Team ID tags and forces Manual Distribution Signing ---
       - name: Build Signed IPA File
         script: |
           echo "Reading bundle identifier directly from profile.mobileprovision..."
@@ -64,15 +64,16 @@ workflows:
           echo "LOCAL BUNDLE ID INJECTED: $LOCAL_BUNDLE_ID"
           
           echo "Reading Development Team ID directly from profile.mobileprovision..."
-          LOCAL_TEAM_ID=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract TeamIdentifier xml1 -o - - | grep string | sed 's/^<string>\(.*\)<\/string>$/\1/g' | xargs)
-          echo "LOCAL TEAM ID INJECTED: $LOCAL_TEAM_ID"
+          # Cleaned sed wrapper to strip out <string> and </string> XML tags completely
+          LOCAL_TEAM_ID=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract TeamIdentifier xml1 -o - - | grep string | sed -e 's/<[^>]*>//g' | xargs)
+          echo "CLEANED LOCAL TEAM ID INJECTED: $LOCAL_TEAM_ID"
           
           if [ -z "$LOCAL_BUNDLE_ID" ] || [ -z "$LOCAL_TEAM_ID" ]; then
             echo "ERROR: Failed to extract signing metadata from profile!"
             exit 1
           fi
           
-          echo "Compiling workspace archive targeting iPhoneOS platform..."
+          echo "Compiling workspace archive targeting iPhoneOS platform manually..."
           xcodebuild -project "$CM_BUILD_DIR/$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -sdk iphoneos \
@@ -80,6 +81,8 @@ workflows:
             -archivePath "$CM_BUILD_DIR/build/Aridman.xcarchive" \
             DEVELOPMENT_TEAM="$LOCAL_TEAM_ID" \
             PRODUCT_BUNDLE_IDENTIFIER="$LOCAL_BUNDLE_ID" \
+            CODE_SIGN_STYLE="Manual" \
+            PROVISIONING_PROFILE_SPECIFIER="$LOCAL_BUNDLE_ID" \
             clean archive
           
           echo "Generating automated inline ExportOptions config template..."
@@ -98,6 +101,11 @@ workflows:
               <string>export</string>
               <key>teamID</key>
               <string>$LOCAL_TEAM_ID</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>$LOCAL_BUNDLE_ID</key>
+                  <string>$LOCAL_BUNDLE_ID</string>
+              </dict>
           </dict>
           </plist>
           EOF
