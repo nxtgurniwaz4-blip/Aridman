@@ -21,28 +21,6 @@ workflows:
           fi
           unzip -o "$APP_ZIP" "AridmansHappyPlace/*" -d "$CM_BUILD_DIR/"
 
-      - name: Auto-Detect Bundle ID and Install Project Specs
-        script: |
-          echo "Reading bundle identifier directly from profile.mobileprovision..."
-          
-          # Extracts the true public bundle ID directly from the binary data
-          EXTRACTED_ID=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract Entitlements.application-identifier xml1 -o - - | grep string | sed 's/^<string>[^\. ]*\.\(.*\)<\/string>$/\1/g' | xargs)
-          echo "DETECTED BUNDLE ID: $EXTRACTED_ID"
-          
-          # Automatically extract the hidden Development Team ID from the profile
-          EXTRACTED_TEAM=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract TeamIdentifier xml1 -o - - | grep string | sed 's/^<string>\(.*\)<\/string>$/\1/g' | xargs)
-          echo "DETECTED DEVELOPMENT TEAM ID: $EXTRACTED_TEAM"
-          
-          # --- FIXED: Saves them globally into the true Codemagic Environment file ---
-          echo "export BUNDLE_ID=\"$EXTRACTED_ID\"" >> $CM_ENV
-          echo "export DEVELOPMENT_TEAM=\"$EXTRACTED_TEAM\"" >> $CM_ENV
-          
-          # Force project.yml to use the correct bundle identifier automatically
-          if [ -f "$CM_BUILD_DIR/project.yml" ]; then
-            echo "Updating project.yml target identifier strings..."
-            sed -i '' "s/com.aridman.happyplace/$EXTRACTED_ID/g" "$CM_BUILD_DIR/project.yml"
-          fi
-
       - name: Install project generator
         script: |
           echo "Configuring homebrew shell paths for Apple Silicon environment..."
@@ -78,17 +56,30 @@ workflows:
           
           echo "Manual code-signing setup completed successfully!"
 
-      # --- FIXED STEP: Targets real iOS devices and loads persistent variables ---
+      # --- FIXED STEP: Variables are extracted and used instantly inside ONE step shell ---
       - name: Build Signed IPA File
         script: |
+          echo "Reading bundle identifier directly from profile.mobileprovision..."
+          LOCAL_BUNDLE_ID=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract Entitlements.application-identifier xml1 -o - - | grep string | sed 's/^<string>[^\. ]*\.\(.*\)<\/string>$/\1/g' | xargs)
+          echo "LOCAL BUNDLE ID INJECTED: $LOCAL_BUNDLE_ID"
+          
+          echo "Reading Development Team ID directly from profile.mobileprovision..."
+          LOCAL_TEAM_ID=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract TeamIdentifier xml1 -o - - | grep string | sed 's/^<string>\(.*\)<\/string>$/\1/g' | xargs)
+          echo "LOCAL TEAM ID INJECTED: $LOCAL_TEAM_ID"
+          
+          if [ -z "$LOCAL_BUNDLE_ID" ] || [ -z "$LOCAL_TEAM_ID" ]; then
+            echo "ERROR: Failed to extract signing metadata from profile!"
+            exit 1
+          fi
+          
           echo "Compiling workspace archive targeting iPhoneOS platform..."
           xcodebuild -project "$CM_BUILD_DIR/$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -sdk iphoneos \
             -configuration Release \
             -archivePath "$CM_BUILD_DIR/build/Aridman.xcarchive" \
-            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            DEVELOPMENT_TEAM="$LOCAL_TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$LOCAL_BUNDLE_ID" \
             clean archive
           
           echo "Generating automated inline ExportOptions config template..."
@@ -106,7 +97,7 @@ workflows:
               <key>destination</key>
               <string>export</string>
               <key>teamID</key>
-              <string>$DEVELOPMENT_TEAM</string>
+              <string>$LOCAL_TEAM_ID</string>
           </dict>
           </plist>
           EOF
