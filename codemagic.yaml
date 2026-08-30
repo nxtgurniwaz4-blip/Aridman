@@ -13,6 +13,23 @@ workflows:
         distribution_type: app_store
         bundle_identifier: com.aridman.happyplace
     scripts:
+      # --- ROBUST FIXED STEP: Target binary directly and isolate app folders ---
+      - name: Safely Extract App Source Folders
+        script: |
+          echo "Scanning directory to find the overflow archive file binary..."
+          # Locates the exact file starting with 'Aridmans-Happy-Place' regardless of layout/extensions
+          TARGET_ARCHIVE=$(find "$CM_BUILD_DIR" -maxdepth 1 -name "Aridmans-Happy-Place*" | head -n 1)
+          
+          if [ -z "$TARGET_ARCHIVE" ]; then
+            echo "ERROR: Could not locate the Aridmans-Happy-Place source file archive!"
+            exit 1
+          fi
+          
+          echo "Found file at: $TARGET_ARCHIVE"
+          echo "Safely extracting only the iOS source folder structures..."
+          
+          # Extracts only the project source files, skipping root-level configurations
+          unzip -o "$TARGET_ARCHIVE" "AridmansHappyPlace/*" -d "$CM_BUILD_DIR/"
       - name: Install project generator
         script: |
           gem install xcodegen
