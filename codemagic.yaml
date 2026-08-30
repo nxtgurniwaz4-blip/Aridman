@@ -8,44 +8,73 @@ workflows:
       vars:
         XCODE_PROJECT: "AridmansHappyPlace.xcodeproj"
         XCODE_SCHEME: "AridmansHappyPlace"
-        BUNDLE_ID: "com.aridman.happyplace"
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.aridman.happyplace
+        # 🔑 Hardcoded password for your public cert.p12
+        CERT_PASSWORD: "Mantappu"
     scripts:
-      # --- ROBUST FIXED STEP: Target binary directly and isolate app folders ---
-      - name: Safely Extract App Source Folders
+      - name: Extract App Source Folders
         script: |
-          echo "Scanning directory to find the overflow archive file binary..."
-          # Locates the exact file starting with 'Aridmans-Happy-Place' regardless of layout/extensions
-          TARGET_ARCHIVE=$(find "$CM_BUILD_DIR" -maxdepth 1 -name "Aridmans-Happy-Place*" | head -n 1)
-          
-          if [ -z "$TARGET_ARCHIVE" ]; then
-            echo "ERROR: Could not locate the Aridmans-Happy-Place source file archive!"
+          echo "Scanning directory to unpack your main app archive..."
+          APP_ZIP=$(find "$CM_BUILD_DIR" -maxdepth 1 -name "Aridmans-Happy-Place*" | head -n 1)
+          if [ -z "$APP_ZIP" ]; then
+            echo "ERROR: Could not locate the app archive!"
             exit 1
           fi
+          unzip -o "$APP_ZIP" "AridmansHappyPlace/*" -d "$CM_BUILD_DIR/"
+
+      - name: Auto-Detect Bundle ID and Install Project Specs
+        script: |
+          echo "Reading bundle identifier directly from profile.mobileprovision..."
           
-          echo "Found file at: $TARGET_ARCHIVE"
-          echo "Safely extracting only the iOS source folder structures..."
+          # Extracts the true public bundle ID directly from the binary data
+          EXTRACTED_ID=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract Entitlements.application-identifier xml1 -o - - | grep string | sed 's/^<string>[^\. ]*\.\(.*\)<\/string>$/\1/g' | xargs)
+          echo "DETECTED BUNDLE ID: $EXTRACTED_ID"
           
-          # Extracts only the project source files, skipping root-level configurations
-          unzip -o "$TARGET_ARCHIVE" "AridmansHappyPlace/*" -d "$CM_BUILD_DIR/"
+          # Saves it globally for Codemagic and Xcode builds
+          echo "export BUNDLE_ID=\"$EXTRACTED_ID\"" >> $CM_ENV
+          
+          # Force project.yml to use the correct bundle identifier automatically
+          if [ -f "$CM_BUILD_DIR/project.yml" ]; then
+            echo "Updating project.yml target identifier strings..."
+            sed -i '' "s/com.aridman.happyplace/$EXTRACTED_ID/g" "$CM_BUILD_DIR/project.yml"
+          fi
+
       - name: Install project generator
         script: |
           gem install xcodegen
+
       - name: Generate Xcode project
         script: |
           xcodegen generate --spec project.yml
-      - name: Set up iOS signing
+
+      - name: Inject Public Certificate into Mac Keychain
         script: |
-          xcode-project use-profiles
-      - name: Build IPA
+          echo "Setting up temporary secure build keychain..."
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security set-keychain-settings -t 3600 -l build.keychain
+          
+          echo "Importing certificate data into runner identities..."
+          security import "$CM_BUILD_DIR/cert.p12" \
+            -k build.keychain \
+            -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/xcodebuild
+            
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+          
+          echo "Linking mobileprovision profile to system storage paths..."
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$CM_BUILD_DIR/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/"
+          
+          echo "Manual code-signing setup completed successfully!"
+
+      - name: Build Signed IPA File
         script: |
           xcode-project build-ipa \
             --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME"
+            
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
-      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
-      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
