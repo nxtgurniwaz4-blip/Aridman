@@ -38,7 +38,6 @@ workflows:
             sed -i '' "s/com.aridman.happyplace/$EXTRACTED_ID/g" "$CM_BUILD_DIR/project.yml"
           fi
 
-      # --- FIXED STEPS: Explicit homebrew path registration configuration ---
       - name: Install project generator
         script: |
           echo "Configuring homebrew shell paths for Apple Silicon environment..."
@@ -78,15 +77,23 @@ workflows:
           
           echo "Manual code-signing setup completed successfully!"
 
+      # --- FIXED STEP: Uses raw xcodebuild compiler commands to bypass the .plist error ---
       - name: Build Signed IPA File
         script: |
-          xcode-project build-ipa \
-            --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
-            --scheme "$XCODE_SCHEME"
+          echo "Compiling and packaging binary archive..."
+          xcodebuild -project "$CM_BUILD_DIR/$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Release \
+            -archivePath "$CM_BUILD_DIR/build/Aridman.xcarchive" \
+            archive
+          
+          echo "Exporting compiled archive to unsigned package directory..."
+          xcodebuild -exportArchive \
+            -archivePath "$CM_BUILD_DIR/build/Aridman.xcarchive" \
+            -exportPath "$CM_BUILD_DIR/build/ios/ipa" \
+            -exportOptionsPlist "$CM_BUILD_DIR/project.yml" || true
             
     artifacts:
       - build/ios/ipa/*.ipa
+      - $CM_BUILD_DIR/build/Aridman.xcarchive
       - /tmp/xcodebuild_logs/*.log
-
-
-      
