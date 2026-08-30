@@ -38,14 +38,10 @@ workflows:
             sed -i '' "s/com.aridman.happyplace/$EXTRACTED_ID/g" "$CM_BUILD_DIR/project.yml"
           fi
 
-      # --- UPDATED: Uses Homebrew (brew) to reliably pull down xcodegen ---
-      - name: Install project generator
-        script: |
-          echo "Installing xcodegen via homebrew system packages..."
-          brew install xcodegen
-
+      # --- FIXED: Removed installer and directly call pre-installed tool ---
       - name: Generate Xcode project
         script: |
+          echo "Running pre-installed system xcodegen spec parser..."
           xcodegen generate --spec project.yml
 
       - name: Inject Public Certificate into Mac Keychain
@@ -80,3 +76,5 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+
+
