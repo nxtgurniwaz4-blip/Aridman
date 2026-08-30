@@ -33,8 +33,26 @@ workflows:
           eval "$(/opt/homebrew/bin/brew shellenv)"
           xcodegen generate --spec project.yml
 
-      - name: Inject Public Certificate into Mac Keychain
+      # --- FIXED STEP: Dynamically registers the identity keys, extracts UUID, and signs perfectly ---
+      - name: Build Signed IPA File
         script: |
+          echo "Reading bundle identifier directly from profile.mobileprovision..."
+          LOCAL_BUNDLE_ID=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract Entitlements.application-identifier xml1 -o - - | grep string | sed 's/^<string>[^\. ]*\.\(.*\)<\/string>$/\1/g' | xargs)
+          echo "LOCAL BUNDLE ID INJECTED: $LOCAL_BUNDLE_ID"
+          
+          echo "Reading Development Team ID directly from profile.mobileprovision..."
+          LOCAL_TEAM_ID=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract TeamIdentifier xml1 -o - - | grep string | sed -e 's/<[^>]*>//g' | xargs)
+          echo "CLEANED LOCAL TEAM ID INJECTED: $LOCAL_TEAM_ID"
+          
+          echo "Extracting actual internal profile UUID..."
+          LOCAL_UUID=$(UUID=$(grep -aA1 "UUID" "$CM_BUILD_DIR/profile.mobileprovision" | grep string | sed -e 's/<[^>]*>//g' | xargs); echo "$UUID")
+          echo "DETECTED PROFILE UUID: $LOCAL_UUID"
+          
+          if [ -z "$LOCAL_BUNDLE_ID" ] || [ -z "$LOCAL_TEAM_ID" ] || [ -z "$LOCAL_UUID" ]; then
+            echo "ERROR: Failed to extract mandatory metadata from profile!"
+            exit 1
+          fi
+          
           echo "Setting up temporary secure build keychain..."
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
@@ -50,28 +68,9 @@ workflows:
             
           security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
           
-          echo "Linking mobileprovision profile to system storage paths..."
+          echo "Linking mobileprovision profile using its true unique identifier matching key..."
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          cp "$CM_BUILD_DIR/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/"
-          
-          echo "Manual code-signing setup completed successfully!"
-
-      # --- FIXED STEP: Cleans the Team ID tags and forces Manual Distribution Signing ---
-      - name: Build Signed IPA File
-        script: |
-          echo "Reading bundle identifier directly from profile.mobileprovision..."
-          LOCAL_BUNDLE_ID=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract Entitlements.application-identifier xml1 -o - - | grep string | sed 's/^<string>[^\. ]*\.\(.*\)<\/string>$/\1/g' | xargs)
-          echo "LOCAL BUNDLE ID INJECTED: $LOCAL_BUNDLE_ID"
-          
-          echo "Reading Development Team ID directly from profile.mobileprovision..."
-          # Cleaned sed wrapper to strip out <string> and </string> XML tags completely
-          LOCAL_TEAM_ID=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract TeamIdentifier xml1 -o - - | grep string | sed -e 's/<[^>]*>//g' | xargs)
-          echo "CLEANED LOCAL TEAM ID INJECTED: $LOCAL_TEAM_ID"
-          
-          if [ -z "$LOCAL_BUNDLE_ID" ] || [ -z "$LOCAL_TEAM_ID" ]; then
-            echo "ERROR: Failed to extract signing metadata from profile!"
-            exit 1
-          fi
+          cp "$CM_BUILD_DIR/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$LOCAL_UUID.mobileprovision"
           
           echo "Compiling workspace archive targeting iPhoneOS platform manually..."
           xcodebuild -project "$CM_BUILD_DIR/$XCODE_PROJECT" \
@@ -82,7 +81,7 @@ workflows:
             DEVELOPMENT_TEAM="$LOCAL_TEAM_ID" \
             PRODUCT_BUNDLE_IDENTIFIER="$LOCAL_BUNDLE_ID" \
             CODE_SIGN_STYLE="Manual" \
-            PROVISIONING_PROFILE_SPECIFIER="$LOCAL_BUNDLE_ID" \
+            PROVISIONING_PROFILE="$LOCAL_UUID" \
             clean archive
           
           echo "Generating automated inline ExportOptions config template..."
@@ -104,7 +103,7 @@ workflows:
               <key>provisioningProfiles</key>
               <dict>
                   <key>$LOCAL_BUNDLE_ID</key>
-                  <string>$LOCAL_BUNDLE_ID</string>
+                  <string>$LOCAL_UUID</string>
               </dict>
           </dict>
           </plist>
