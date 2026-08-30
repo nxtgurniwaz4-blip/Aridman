@@ -38,10 +38,21 @@ workflows:
             sed -i '' "s/com.aridman.happyplace/$EXTRACTED_ID/g" "$CM_BUILD_DIR/project.yml"
           fi
 
-      # --- FIXED: Removed installer and directly call pre-installed tool ---
+      # --- FIXED STEPS: Explicit homebrew path registration configuration ---
+      - name: Install project generator
+        script: |
+          echo "Configuring homebrew shell paths for Apple Silicon environment..."
+          eval "$(/opt/homebrew/bin/brew shellenv)"
+          
+          echo "Installing xcodegen package dependencies..."
+          brew install xcodegen
+
       - name: Generate Xcode project
         script: |
-          echo "Running pre-installed system xcodegen spec parser..."
+          echo "Registering homebrew variables to locate binary tools..."
+          eval "$(/opt/homebrew/bin/brew shellenv)"
+          
+          echo "Running XcodeGen spec configurations..."
           xcodegen generate --spec project.yml
 
       - name: Inject Public Certificate into Mac Keychain
@@ -78,3 +89,4 @@ workflows:
       - /tmp/xcodebuild_logs/*.log
 
 
+      
