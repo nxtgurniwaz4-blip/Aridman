@@ -29,8 +29,13 @@ workflows:
           EXTRACTED_ID=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract Entitlements.application-identifier xml1 -o - - | grep string | sed 's/^<string>[^\. ]*\.\(.*\)<\/string>$/\1/g' | xargs)
           echo "DETECTED BUNDLE ID: $EXTRACTED_ID"
           
-          # Saves it globally for Codemagic and Xcode builds
+          # Automatically extract the hidden Development Team ID from the profile
+          EXTRACTED_TEAM=$(security cms -D -i "$CM_BUILD_DIR/profile.mobileprovision" | plutil -extract TeamIdentifier xml1 -o - - | grep string | sed 's/^<string>\(.*\)<\/string>$/\1/g' | xargs)
+          echo "DETECTED DEVELOPMENT TEAM ID: $EXTRACTED_TEAM"
+          
+          # Saves them globally for Codemagic and Xcode builds
           echo "export BUNDLE_ID=\"$EXTRACTED_ID\"" >> $CM_ENV
+          echo "export DEVELOPMENT_TEAM=\"$EXTRACTED_TEAM\"" >> $CM_ENV
           
           # Force project.yml to use the correct bundle identifier automatically
           if [ -f "$CM_BUILD_DIR/project.yml" ]; then
@@ -42,16 +47,12 @@ workflows:
         script: |
           echo "Configuring homebrew shell paths for Apple Silicon environment..."
           eval "$(/opt/homebrew/bin/brew shellenv)"
-          
-          echo "Installing xcodegen package dependencies..."
           brew install xcodegen
 
       - name: Generate Xcode project
         script: |
           echo "Registering homebrew variables to locate binary tools..."
           eval "$(/opt/homebrew/bin/brew shellenv)"
-          
-          echo "Running XcodeGen spec configurations..."
           xcodegen generate --spec project.yml
 
       - name: Inject Public Certificate into Mac Keychain
@@ -77,14 +78,16 @@ workflows:
           
           echo "Manual code-signing setup completed successfully!"
 
-      # --- FIXED STEP: Dynamically generates the configuration and exports the .ipa ---
+      # --- FIXED STEP: Explicitly overrides Team ID and enforces the profile mapping ---
       - name: Build Signed IPA File
         script: |
-          echo "Compiling basic workspace archive..."
+          echo "Compiling workspace archive with explicit Team credentials..."
           xcodebuild -project "$CM_BUILD_DIR/$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -configuration Release \
             -archivePath "$CM_BUILD_DIR/build/Aridman.xcarchive" \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
             clean archive
           
           echo "Generating automated inline ExportOptions config template..."
@@ -101,6 +104,8 @@ workflows:
               <false/>
               <key>destination</key>
               <string>export</string>
+              <key>teamID</key>
+              <string>$DEVELOPMENT_TEAM</string>
           </dict>
           </plist>
           EOF
@@ -110,10 +115,8 @@ workflows:
           xcodebuild -exportArchive \
             -archivePath "$CM_BUILD_DIR/build/Aridman.xcarchive" \
             -exportPath "$CM_BUILD_DIR/build/ios/ipa" \
-            -exportOptionsPlist "$CM_BUILD_DIR/ExportOptions.plist" \
-            -allowProvisioningUpdates
+            -exportOptionsPlist "$CM_BUILD_DIR/ExportOptions.plist"
             
     artifacts:
-      # This targets the generated standalone package output directly
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
